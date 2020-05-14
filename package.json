@@ -1,7 +1,7 @@
 {
   "name": "node-red-contrib-http-instance",
-  "version": "1.0.0",
-  "description": "http(s) server instance with in and out nodes",
+  "version": "1.0.1",
+  "description": "Http(s) server instance with in and response nodes",
   "scripts": {
     "test": "mocha \"test/**/*_spec.js\""
   },
