@@ -28,10 +28,12 @@ module.exports = function (RED) {
                     isText = true;
                 } else if (parsedType.type !== "application") {
                     isText = false;
-                } else if (parsedType.subtype !== "octet-stream") {
+                } else if (parsedType.subtype !== "octet-stream"
+                    && (parsedType.subtype !== "cbor")
+                    && (parsedType.subtype !== "x-protobuf")) {
                     checkUTF = true;
                 } else {
-                    // applicatino/octet-stream
+                    // application/octet-stream
                     isText = false;
                 }
 
@@ -81,7 +83,7 @@ module.exports = function (RED) {
             "stale",
             "subdomains",
             "xhr",
-            "socket" // TODO: tidy node up
+            "socket"
         ];
         toWrap.forEach(function (f) {
             if (typeof req[f] === "function") {
@@ -235,7 +237,7 @@ module.exports = function (RED) {
         const node = this;
         node.headers = node.headers || {};
         node.statusCode = node.statusCode;
-        node.on('input', (msg) => {
+        node.on('input', (msg, send, done) => {
             if (msg.res) {
                 var headers = RED.util.cloneMessage(node.headers);
                 if (msg.headers) {
