@@ -1,17 +1,21 @@
 module.exports = function (RED) {
     "use strict";
-    var bodyParser = require('body-parser');
-    var cookieParser = require('cookie-parser');
+    var rootApp;
+    var bodyParser = require("body-parser");
+    var multer = require("multer");
+    var cookieParser = require("cookie-parser");
     var getBody = require('raw-body');
+    var cors = require('cors');
+    var onHeaders = require('on-headers');
     var typer = require('content-type');
     var mediaTyper = require('media-typer');
     var isUtf8 = require('is-utf8');
-    var multer = require('multer');
-    var hashSum = require('hash-sum');
+    var hashSum = require("hash-sum");
+    var rawDataRoutes = new Set();
 
     function rawBodyParser(req, res, next) {
-        if (req.skipRawBodyParser) { next(); } // don't parse node if told to skip
-        if (req._body) { return next(); }
+        if (req.skipRawBodyParser || req._body || req.readableEnded) return next();
+        
         req.body = "";
         req._body = true;
 
@@ -28,12 +32,12 @@ module.exports = function (RED) {
                     isText = true;
                 } else if (parsedType.type !== "application") {
                     isText = false;
-                } else if (parsedType.subtype !== "octet-stream"
+                } else if ((parsedType.subtype !== "octet-stream")
                     && (parsedType.subtype !== "cbor")
                     && (parsedType.subtype !== "x-protobuf")) {
                     checkUTF = true;
                 } else {
-                    // application/octet-stream
+                    // application/octet-stream or application/cbor
                     isText = false;
                 }
 
@@ -52,8 +56,78 @@ module.exports = function (RED) {
             next();
         });
     }
-    function createRequestWrapper(node, req) {
-        // node misses a bunch of properties (eg headers). Before we use node function
+
+    /**
+     * This method retrieves the root app by traversing the parent hierarchy.
+     * @param {import('express').Application} app 
+     * @returns {import('express').Application}
+     */
+    function getRootApp(app) {
+        if (typeof app.parent === 'undefined') {
+            return app;
+        }
+        return getRootApp(app.parent);
+    }
+
+    /**
+     * It provide the unique route key
+     * @param {{method: string, url: string}} obj 
+     * @returns 
+     */
+    function getRouteKey(obj) {
+        var method = obj.method.toUpperCase();
+        // Normalize the URL by replacing double slashes with a single slash and removing the trailing slash
+        var url = obj.url.replace(/\/{2,}/g, '/').replace(/\/$/, '');
+        return `${method}:${url}`;
+    }
+
+    /**
+     * This middleware is for capture raw body
+     * @param {import('express').Request} req 
+     * @param {import('express').Response} _res 
+     * @param {import('express').NextFunction} next 
+     * @returns 
+     */
+    function rawBodyCapture(req, _res, next) {
+        var routeKey = getRouteKey({ method: req.method, url: req._parsedUrl.pathname });
+        // Check if routeKey exist in rawDataRoutes
+        if (rawDataRoutes.has(routeKey)) {
+            // Convert the request stream to buffer
+            getBody(req, {
+                length: req.headers['content-length'],
+            }, function (err, buf) {
+                if (err) {
+                    return next(err);
+                }
+                req.body = buf; 
+                // Skip the body parsing
+                req.skipRawBodyParser = true;
+                req._body = true;          
+                next();
+            })
+        } else {
+            next();
+        }
+    }
+
+    if(typeof RED.httpNode === 'function' && (rootApp = getRootApp(RED.httpNode))) {
+        // Add middleware to the stack
+        rootApp.use(rawBodyCapture);
+        // Find the newly added middleware and move it to the top of the stack
+        // Do not assume its the last entry in the stack as some frameworks (eg loopback)
+        // add middleware in particular orders
+        for (let i = 0; i < rootApp._router.stack.length; i++) {
+            const layer = rootApp._router.stack[i];
+            if (layer && layer.handle === rawBodyCapture) {
+                // Move the middleware to top of the stack 
+                rootApp._router.stack.unshift(rootApp._router.stack.splice(i, 1)[0]);
+                break;
+            }
+        }
+    }
+
+    function createRequestWrapper(node,req) {
+        // This misses a bunch of properties (eg headers). Before we use this function
         // need to ensure it captures everything documented by Express and HTTP modules.
         var wrapper = {
             _req: req
@@ -83,13 +157,13 @@ module.exports = function (RED) {
             "stale",
             "subdomains",
             "xhr",
-            "socket"
+            "socket" // TODO: tidy this up
         ];
-        toWrap.forEach(function (f) {
+        toWrap.forEach(function(f) {
             if (typeof req[f] === "function") {
-                wrapper[f] = function () {
-                    node.warn(RED._("httpin.errors.deprecated-call", { method: "msg.req." + f }));
-                    var result = req[f].apply(req, arguments);
+                wrapper[f] = function() {
+                    node.warn(RED._("httpin.errors.deprecated-call",{method:"msg.req."+f}));
+                    var result = req[f].apply(req,arguments);
                     if (result === req) {
                         return wrapper;
                     } else {
@@ -104,7 +178,8 @@ module.exports = function (RED) {
 
         return wrapper;
     }
-    function createResponseWrapper(node, res) {
+
+    function createResponseWrapper(node,res) {
         var wrapper = {
             _res: res
         };
@@ -132,10 +207,10 @@ module.exports = function (RED) {
             "type",
             "vary"
         ];
-        toWrap.forEach(function (f) {
-            wrapper[f] = function () {
-                node.warn(RED._("httpin.errors.deprecated-call", { method: "msg.res." + f }));
-                var result = res[f].apply(res, arguments);
+        toWrap.forEach(function(f) {
+            wrapper[f] = function() {
+                node.warn(RED._("httpin.errors.deprecated-call",{method:"msg.res."+f}));
+                var result = res[f].apply(res,arguments);
                 if (result === res) {
                     return wrapper;
                 } else {
@@ -145,6 +220,14 @@ module.exports = function (RED) {
         });
         return wrapper;
     }
+
+    var corsHandler = function(req,res,next) { next(); }
+
+    if (RED.settings.httpNodeCors) {
+        corsHandler = cors(RED.settings.httpNodeCors);
+        RED.httpNode.options("*", corsHandler);
+    }
+
 
     function HTTPInstIn(config) {
         RED.nodes.createNode(this, config);
@@ -167,6 +250,8 @@ module.exports = function (RED) {
         }
         node.method = config.method;
         node.upload = config.upload;
+        node.skipBodyParsing = config.skipBodyParsing;
+        node.swaggerDoc = config.swaggerDoc;
 
         if (typeof config.server === 'string') {
             node.app = RED.nodes.getNode(config.server).app;
@@ -174,52 +259,99 @@ module.exports = function (RED) {
             node.app = config.server.app;
         }
 
+        var routeKey = getRouteKey({method: this.method, url: RED.httpNode.path() + this.url});
 
-        const errorHandler = (err, req, res, next) => {
+        // If the user enables raw body, add it to the raw data routes.
+        if(this.skipBodyParsing) {
+            rawDataRoutes.add(routeKey);
+        }
+
+        this.errorHandler = function(err,req,res,next) {
             node.warn(err);
             res.sendStatus(500);
         };
 
-        const callback = (req, res) => {
+        this.callback = (req, res) => {
             var msgid = RED.util.generateId();
-            res._msgid = msgid;
-            if (node.method.match(/^(post|delete|put|options|patch)$/)) {
-                node.send({ _msgid: msgid, req: req, res: createResponseWrapper(node, res), payload: req.body });
-            } else if (node.method == 'get') {
-                node.send({ _msgid: msgid, req: req, res: createResponseWrapper(node, res), payload: req.query });
-            } else {
-                node.send({ _msgid: msgid, req: req, res: createResponseWrapper(node, res) });
+                res._msgid = msgid;
+                // Since Node 15, req.headers are lazily computed and the property
+                // marked as non-enumerable.
+                // That means it doesn't show up in the Debug sidebar.
+                // This redefines the property causing it to be evaluated *and*
+                // marked as enumerable again.
+                Object.defineProperty(req, 'headers', {
+                    value: req.headers,
+                    enumerable: true
+                })
+                if (node.method.match(/^(post|delete|put|options|patch)$/)) {
+                    node.send({_msgid:msgid,req:req,res:createResponseWrapper(node,res),payload:req.body});
+                } else if (node.method == "get") {
+                    node.send({_msgid:msgid,req:req,res:createResponseWrapper(node,res),payload:req.query});
+                } else {
+                    node.send({_msgid:msgid,req:req,res:createResponseWrapper(node,res)});
+                }
+            };
+
+        var httpMiddleware = function(req,res,next) { next(); }
+
+        if (RED.settings.httpNodeMiddleware) {
+            if (typeof RED.settings.httpNodeMiddleware === "function" || Array.isArray(RED.settings.httpNodeMiddleware)) {
+                httpMiddleware = RED.settings.httpNodeMiddleware;
             }
         }
 
-        var multipartParser = (req, res, next) => { next(); }
-        if (node.upload) {
+        var metricsHandler = function(req,res,next) { next(); }
+
+        if (this.metric()) {
+            metricsHandler = function(req, res, next) {
+                var startAt = process.hrtime();
+                onHeaders(res, function() {
+                    if (res._msgid) {
+                        var diff = process.hrtime(startAt);
+                        var ms = diff[0] * 1e3 + diff[1] * 1e-6;
+                        var metricResponseTime = ms.toFixed(3);
+                        var metricContentLength = res.getHeader("content-length");
+                        //assuming that _id has been set for res._metrics in HttpOut node!
+                        node.metric("response.time.millis", {_msgid:res._msgid} , metricResponseTime);
+                        node.metric("response.content-length.bytes", {_msgid:res._msgid} , metricContentLength);
+                    }
+                });
+                next();
+            };
+        }
+
+        var multipartParser = function(req,res,next) { next(); }
+        if (this.upload) {
             var mp = multer({ storage: multer.memoryStorage() }).any();
-            multipartParser = (req, res, next) => {
-                mp(req, res, (err) => {
+            multipartParser = function(req,res,next) {
+                if(req.readableEnded || req._body) return next();
+                mp(req,res,function(err) {
                     req._body = true;
                     next(err);
                 })
             };
         }
 
-        const maxApiRequestSize = RED.settings.apiMaxLength || config.maxApiRequestSize || '5mb';
+        const maxApiRequestSize = RED.settings.apiMaxLength || '5mb';
+
         const jsonParser = bodyParser.json({ limit: maxApiRequestSize });
         const urlencParser = bodyParser.urlencoded({ limit: maxApiRequestSize, extended: true });
 
-        if (node.method == 'get') {
-            node.app.get(node.url, cookieParser(), callback, errorHandler);
-        } else if (node.method == 'post') {
-            node.app.post(node.url, cookieParser(), jsonParser, urlencParser, multipartParser, rawBodyParser, callback, errorHandler);
-        } else if (node.method == 'put') {
-            node.app.put(node.url, cookieParser(), jsonParser, urlencParser, rawBodyParser, callback, errorHandler);
-        } else if (node.method == 'patch') {
-            node.app.patch(node.url, cookieParser(), jsonParser, urlencParser, rawBodyParser, callback, errorHandler);
-        } else if (node.method == 'delete') {
-            node.app.delete(node.url, cookieParser(), jsonParser, urlencParser, rawBodyParser, callback, errorHandler);
+        if (this.method == "get") {
+            node.app.get(this.url, cookieParser(), httpMiddleware, corsHandler, metricsHandler, this.callback, this.errorHandler);
+        } else if (this.method == "post") {
+            node.app.post(this.url,cookieParser(), httpMiddleware, corsHandler, metricsHandler, jsonParser, urlencParser, multipartParser, rawBodyParser, this.callback, this.errorHandler);
+        } else if (this.method == "put") {
+            node.app.put(this.url, cookieParser(), httpMiddleware, corsHandler, metricsHandler, jsonParser, urlencParser, rawBodyParser, this.callback, this.errorHandler);
+        } else if (this.method == "patch") {
+            node.app.patch(this.url, cookieParser(), httpMiddleware, corsHandler, metricsHandler, jsonParser, urlencParser, rawBodyParser, this.callback, this.errorHandler);
+        } else if (this.method == "delete") {
+            node.app.delete(this.url, cookieParser(), httpMiddleware, corsHandler, metricsHandler, jsonParser, urlencParser, rawBodyParser, this.callback, this.errorHandler);
         }
 
         node.on('close', () => {
+            rawDataRoutes.delete(routeKey);
+
             node.app._router.stack.forEach((route, i, routes) => {
                 if (route.route && route.route.path === node.url && route.route.methods[node.method]) {
                     routes.splice(i, 1);
@@ -236,7 +368,8 @@ module.exports = function (RED) {
 
         const node = this;
         node.headers = node.headers || {};
-        node.statusCode = node.statusCode;
+        node.statusCode = parseInt(node.statusCode);
+
         node.on('input', (msg, send, done) => {
             if (msg.res) {
                 var headers = RED.util.cloneMessage(node.headers);
@@ -257,9 +390,11 @@ module.exports = function (RED) {
                         }
                     }
                 }
+
                 if (Object.keys(headers).length > 0) {
                     msg.res._res.set(headers);
                 }
+
                 if (msg.cookies) {
                     for (var name in msg.cookies) {
                         if (msg.cookies.hasOwnProperty(name)) {
@@ -277,7 +412,9 @@ module.exports = function (RED) {
                         }
                     }
                 }
+
                 var statusCode = node.statusCode || msg.statusCode || 200;
+                
                 if (typeof msg.payload == 'object' && !Buffer.isBuffer(msg.payload)) {
                     msg.res._res.status(statusCode).jsonp(msg.payload);
                 } else {

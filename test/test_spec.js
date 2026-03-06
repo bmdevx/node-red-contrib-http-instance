@@ -40,7 +40,7 @@ describe('http nodes', function () {
             id: "serv", type: "node-inst-server", name: "node-inst-server", port: 8080
         },
         { id: "nout", type: "http-inst-out", name: "http-inst-out" },
-        { id: "nin", type: "http-inst-in", name: "http-inst-in", wires: [["nout"]], server: "serv", url: "/test", method: "get" }];
+        { id: "nin", type: "http-inst-in", name: "http-inst-in", wires: [["nout"]], server: "serv", url: "/test", method: "post" }];
 
         helper.load([node_server, node_in_out], flow, {
         }, function () {
@@ -50,10 +50,10 @@ describe('http nodes', function () {
 
             const fdone = done;
 
-            nout.on("input", function (msg, send, done) {
+            nout.on("input", (msg, send, done) => {
                 done();
 
-                if (msg.payload.value === "close") {
+                if (msg.payload.value === "test") {
                     fdone();
                 }
             });
