@@ -10,24 +10,24 @@
     <div class="form-row">
         <label for="node-input-method"><i class="fa fa-tasks"></i> Method <span data-i18n="httpin.label.method"></span></label>
         <select type="text" id="node-input-method" style="width:70%;">
-        <option value="get">GET</option>
-        <option value="post">POST</option>
-        <option value="put">PUT</option>
-        <option value="delete">DELETE</option>
-        <option value="patch">PATCH</option>
+            <option value="get">GET</option>
+            <option value="post">POST</option>
+            <option value="put">PUT</option>
+            <option value="delete">DELETE</option>
+            <option value="patch">PATCH</option>
         </select>
     </div>
 
     <div id="form-reqBody-http-in-controller" class="form-row hide" style="display: flex;">
         <label>&nbsp;</label>
         <div style="display: flex; margin-left: 5px; flex-direction: column-reverse; gap: 10px; justify-content: center;">
-            <div id="form-row-http-in-upload" class="hide" style="display: flex; gap: 10px">
-                <input type="checkbox" id="node-input-upload" style="margin: 0px;">
-                <label for="node-input-upload" style="text-wrap: nowrap; margin-bottom: 0;" data-i18n="httpin.label.upload"></label>
+            <div id="form-row-http-in-upload" class="hide" style="display: flex; gap: 10px;">
+                <input type="checkbox" id="node-input-upload" style="margin: 0px;" autocomplete="off">
+                <label for="node-input-upload" style="text-wrap: nowrap; margin-bottom: 0;" data-i18n="node-red:httpin.label.upload">Accept file uploads</label>
             </div>
-            <div id="form-row-http-in-parsing" class="hide" style="display: flex; gap: 10px">
-                <input type="checkbox" id="node-input-skipBodyParsing" style="margin: 0px;">
-                <label for="node-input-skipBodyParsing" style="text-wrap: nowrap; margin-bottom: 0;" data-i18n="httpin.label.parsing"></label>
+            <div id="form-row-http-in-parsing" class="hide" style="display: flex; gap: 10px;">
+                <input type="checkbox" id="node-input-skipBodyParsing" style="margin: 0px;" autocomplete="off">
+                <label for="node-input-skipBodyParsing" style="text-wrap: nowrap; margin-bottom: 0;" data-i18n="node-red:httpin.label.parsing">Do not parse request body</label>
             </div>
         </div>
     </div>
@@ -35,10 +35,6 @@
     <div class="form-row">
         <label for="node-input-url"><i class="fa fa-globe"></i> <span data-i18n="httpin.label.url"></span></label>
         <input id="node-input-url" type="text" placeholder="/url">
-    </div>
-    <div class="form-row">
-        <label for="node-input-name"><i class="fa fa-tag"></i> <span data-i18n="common.label.name"></span></label>
-        <input type="text" id="node-input-name" data-i18n="[placeholder]common.label.name">
     </div>
     <div class="form-row row-swagger-doc">
         <label for="node-input-swaggerDoc"><i class="fa fa-file-text-o"></i> <span data-i18n="httpin.label.doc"></span></label>
@@ -83,7 +79,7 @@
             outputs: 1,
             icon: "white-globe.svg",
             paletteLabel: "http inst in",
-            label: () => {
+            label: function () {
                 if (this.name) {
                     return this.name;
                 } else if (this.url) {
@@ -101,10 +97,10 @@
                     return "http";
                 }
             },
-            labelStyle: () => {
+            labelStyle: function () {
                 return this.name ? "node_label_italic" : "";
             },
-            oneditprepare: () => {
+            oneditprepare: function () {
                 var root = RED.settings.httpNodeRoot;
                 if (root.slice(-1) == "/") {
                     root = root.slice(0, -1);
@@ -118,19 +114,19 @@
                 if (!RED.nodes.getType("swagger-doc")) {
                     $('.row-swagger-doc').hide();
                 }
-                $("#node-input-method").on("change", () => {
+                $("#node-input-method").on("change", function () {
                     var method = $(this).val();
                     if (["post", "put", "patch", "delete"].includes(method)) {
                         $("#form-reqBody-http-in-controller").show();
-                        $("#form-row-http-in-parsing").show();
                         if (method === "post") {
                             $("#form-row-http-in-upload").show();
                         } else {
                             $("#form-row-http-in-upload").hide();
                         }
+                        $("#form-row-http-in-parsing").show();
                     } else {
-                        $("#form-row-http-in-parsing").hide();
                         $("#form-row-http-in-upload").hide();
+                        $("#form-row-http-in-parsing").hide();
                         $("#form-reqBody-http-in-controller").hide();
                     }
                 }).change();
@@ -166,15 +162,15 @@
             align: "right",
             icon: "white-globe.svg",
             paletteLabel: "http inst response",
-            label: () => {
+            label: function () {
                 return this.name || ("http" + (this.statusCode ? " (" + this.statusCode + ")" : ""));
             },
-            labelStyle: () => {
+            labelStyle: function () {
                 return this.name ? "node_label_italic" : "";
             },
-            oneditprepare: () => {
+            oneditprepare: function () {
                 var headerList = $("#node-input-headers-container").css('min-height', '150px').css('min-width', '450px').editableList({
-                    addItem: (container, i, header) => {
+                    addItem: function (container, i, header) {
                         var row = $('<div/>').css({
                             overflow: 'hidden',
                             whiteSpace: 'nowrap',
@@ -249,11 +245,11 @@
                     }
                 }
             },
-            oneditsave: () => {
+            oneditsave: function () {
                 var headers = $("#node-input-headers-container").editableList('items');
                 var node = this;
                 node.headers = {};
-                headers.each((i) => {
+                headers.each(function (i) {
                     var header = $(this);
                     var keyType = header.find(".node-input-header-name").typedInput('type');
                     var keyValue = header.find(".node-input-header-name").typedInput('value');
@@ -272,7 +268,7 @@
                     }
                 });
             },
-            oneditresize: (size) => {
+            oneditresize: function (size) {
                 var rows = $("#dialog-form>div:not(.node-input-headers-container-row)");
                 var height = size.height;
                 for (var i = 0; i < rows.length; i++) {
